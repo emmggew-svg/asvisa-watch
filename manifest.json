@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "AS Visa Randevu Nöbetçisi",
+  "version": "1.0.0",
+  "description": "as-visa.com randevu sayfasını 15 dakikada bir kontrol eder, uygun randevu görünce haber verir.",
+  "permissions": ["alarms", "notifications", "storage", "tabs", "scripting"],
+  "host_permissions": [
+    "https://www.as-visa.com/*",
+    "https://api.telegram.org/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_popup": "popup.html", "default_title": "AS Visa Nöbetçi" },
+  "content_scripts": [
+    { "matches": ["https://www.as-visa.com/*"], "js": ["hook.js"], "run_at": "document_start", "world": "MAIN" },
+    { "matches": ["https://www.as-visa.com/*"], "js": ["content.js"], "run_at": "document_idle" }
+  ]
+}
