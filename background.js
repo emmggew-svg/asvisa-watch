@@ -42,7 +42,6 @@ async function ensureAlarm() {
 }
 
 chrome.runtime.onInstalled.addListener(async () => {
-  await ensureAlarm();
   const s = await getState();
   if (s.active && Date.now() < s.endAt) await ensureAlarm();
 });
