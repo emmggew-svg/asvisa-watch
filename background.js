@@ -89,20 +89,41 @@ async function ensureContentScript(tabId) {
   }
 }
 
+/* Sekme yüklemesi bitene kadar bekle. Dinleyici, yönlendirmeden ÖNCE eklenmeli (yarış durumu). */
+function waitComplete(tabId, ms = 30000) {
+  return new Promise((resolve) => {
+    const t = setTimeout(done, ms);
+    function onUpd(id, info) { if (id === tabId && info.status === "complete") done(); }
+    function done() {
+      clearTimeout(t);
+      chrome.tabs.onUpdated.removeListener(onUpd);
+      resolve();
+    }
+    chrome.tabs.onUpdated.addListener(onUpd);
+  });
+}
+
 async function runCheckOnce() {
   const tab = await findTab(true);
   if (!tab || tab.id == null) return { status: "unknown", detail: "Sekme açılamadı." };
 
-  if (!(tab.url || "").startsWith(APP_URL)) {
-    await chrome.tabs.update(tab.id, { url: APP_URL });
-    await new Promise((r) => setTimeout(r, 3000));
-  }
+  // Her turda taze DOM: sekme zaten /appointment olsa bile yeniden yükle
+  const loaded = waitComplete(tab.id);
+  await chrome.tabs.update(tab.id, { url: APP_URL });
+  await loaded;
 
   await ensureContentScript(tab.id);
 
   const result = await new Promise((resolve) => {
     let done = false;
-    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    let timer = 0;
+    const finish = (v) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(v);
+    };
+    timer = setTimeout(() => finish({ status: "unknown", detail: "Zaman aşımı." }), 60000);
     try {
       chrome.tabs.sendMessage(tab.id, { type: "check" }, (res) => {
         if (chrome.runtime.lastError || !res) finish({ status: "unknown", detail: "Sayfa yanıt vermedi." });
@@ -111,7 +132,6 @@ async function runCheckOnce() {
     } catch (e) {
       finish({ status: "unknown", detail: String(e) });
     }
-    setTimeout(() => finish({ status: "unknown", detail: "Zaman aşımı." }), 25000);
   });
 
   return result;
