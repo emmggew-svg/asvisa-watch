@@ -55,6 +55,7 @@ function stepInfo() {
   return [title, ind].filter(Boolean).join(" · ");
 }
 
+// TODO(api): müsaitlik tespiti teşhis şemasına bağlanacak (Görev 6, Aşama B)
 /* Saf karar fonksiyonu: sayfa metni + ofis kartları → durum. DOM'a dokunmaz, test edilebilir. */
 function classify(text, offices) {
   if (RE_BLOCKED.test(text)) {

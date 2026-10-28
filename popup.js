@@ -66,6 +66,66 @@ async function loadDiag() {
   $("diag").textContent = last ? `${new Date(last.ts).toLocaleTimeString("tr-TR")}\n${last.url}\n${last.body}` : "Kayıt yok.";
 }
 
+/* ---- teşhis maskeleme: dışarı çıkmadan önce kişisel veriyi temizle ---- */
+
+const SENSITIVE_KEY = /^(name|surname|firstName|lastName|passport.*|phone|email|birth.*)$/i;
+
+function maskValue(v) {
+  return String(v)
+    .replace(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, "[email]")
+    .replace(/\d{6,}/g, "[num]");
+}
+
+function maskNode(node) {
+  if (Array.isArray(node)) return node.map(maskNode);
+  if (node && typeof node === "object") {
+    const out = {};
+    for (const [k, v] of Object.entries(node)) {
+      out[k] = SENSITIVE_KEY.test(k) ? "[gizli]" : maskNode(v);
+    }
+    return out;
+  }
+  return typeof node === "string" ? maskValue(node) : node;
+}
+
+/* JSON metni alır, maskelenmiş JSON metni döndürür; çözümlenemezse düz metin maskeler. */
+function maskDiag(text) {
+  const raw = String(text ?? "");
+  try {
+    return JSON.stringify(maskNode(JSON.parse(raw)), null, 2);
+  } catch {
+    return maskValue(raw);
+  }
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
+}
+
+$("copy").addEventListener("click", async () => {
+  const { diag = [] } = await chrome.storage.local.get("diag");
+  // ts ve url maskelenmez: uç noktayı bulmak için gerekli
+  const safe = diag.map((d) => ({ ts: d.ts, url: d.url, body: maskDiag(d.body) }));
+  const ok = await copyText(JSON.stringify(safe, null, 2));
+  $("copy").textContent = ok ? `Kopyalandı (${safe.length})` : "Kopyalanamadı";
+  setTimeout(() => { $("copy").textContent = "Teşhisi kopyala"; }, 1800);
+});
+
 $("start").addEventListener("click", async () => {
   $("start").disabled = true;
   await send("start");
