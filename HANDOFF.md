@@ -62,13 +62,16 @@ chrome.alarms (15 dk)
   → background.checkNow()
      → endAt geçtiyse durdur + bitiş bildirimi
      → as-visa sekmesi var mı? yoksa pasif sekme aç
-     → sekme /appointment değilse tabs.update(APP_URL), 3 sn bekle
+     → HER TURDA: waitComplete dinleyicisi kurulur → tabs.update(APP_URL) → yükleme bitene kadar bekle (max 30 sn)
      → content script yoksa chrome.scripting.executeScript ile enjekte et
-     → tabs.sendMessage({type:"check"})  (25 sn timeout)
+     → tabs.sendMessage({type:"check"})  (60 sn timeout)
         → content.inspect(): 20 sn'ye kadar sayfanın oturmasını bekle (400 ms poll)
-        → sınıflandır, dön
-     → state'i yaz; available → masaüstü + Telegram
-     → blocked → saatte en fazla 1 kez uyarı
+        → classify(text, offices) → gerekirse 2 sn sonra tekrar
+        → step bilgisini ekle, dön
+     → state'i yaz
+     → available → masaüstü + Telegram
+     → blocked   → saatte en fazla 1 kez uyarı
+     → login/unknown üst üste 3 kez → saatte en fazla 1 kez uyarı
 ```
 
 ### Tespit kuralları (`content.js`)
@@ -81,59 +84,72 @@ RE_OFFICE_STEP = /Başvuru Merkezini Seçin/i
 RE_LOGIN       = /Giriş Yap|Şifre|Parola/i
 ```
 
-Karar:
-- `RE_WIZARD` yok + `blocked` → `blocked`; `login` → `login`; ikisi de yok → `unknown`
-- `RE_OFFICE_STEP` var + `RE_NO_SLOT` **yok** → `available`
+Karar (saf `classify(text, offices)` fonksiyonu — DOM'a dokunmaz, test edilebilir):
+- `RE_BLOCKED` → `blocked`
+- `RE_WIZARD` yok → `login` (giriş metni varsa) veya `unknown`
+- `RE_OFFICE_STEP` var + `RE_NO_SLOT` **yok** → **en az bir ofis butonu varsa** `available`, yoksa `unknown` + `waiting:true`
 - `RE_OFFICE_STEP` var + `RE_NO_SLOT` var → `none`
+- diğer → `unknown`
+
+`inspect()` `waiting` görürse 2 sn bekleyip tekrar sınıflandırır (ofis listesi API'den gecikmeli geliyor). Her sonuca `step` eklenir: ilk `h2` metni (≤60 karakter) + varsa `N/8` göstergesi.
 
 Metin okuma: `body.innerText`; yoksa `script/style/noscript/template` ayıklanmış `textContent`. (Ham `textContent` script içindeki dizgeleri sayıp yanlış pozitif üretiyordu.)
 
 ### Durum modeli (`chrome.storage.local`)
 
-- `state`: `{active, startedAt, endAt, lastCheck, lastStatus, lastDetail, lastOffices, lastBlockedNotify, lastNotified}`
+- `state`: `{active, startedAt, endAt, lastCheck, lastStatus, lastDetail, lastOffices, lastStep, lastBlockedNotify, lastNotified, unknownStreak, lastProblemNotify}`
 - `config`: `{telegramToken, telegramChat}`
-- `diag`: son 20 API yanıtı `{ts, url, body}` (en fazla 300 + 2000 karakter)
+- `diag`: son 20 API yanıtı `{ts, url, body}` (en fazla 300 + 2000 karakter). Popup'taki **Teşhisi kopyala** butonu bunları maskeler: e-posta → `[email]`, 6+ haneli sayı → `[num]`, `name/surname/firstName/lastName/passport*/phone/email/birth*` değerleri → `[gizli]`; `ts` ve `url` maskelenmez.
 
 ### Süre/limit
 
-- `PERIOD_MIN = 15`, `WATCH_MS = 3 gün`, blok uyarısı aralığı `1 saat`
+- `PERIOD_MIN = 15`, `WATCH_MS = 3 gün`
+- `BLOCKED_NOTIFY_GAP_MS = 1 saat`, `PROBLEM_NOTIFY_GAP_MS = 1 saat`
+- `login`/`unknown` üst üste 3 tur → uyarı (saatte en fazla 1)
 - Süre bitince `stopWatch(true)` → alarm silinir, tek seferlik "nöbet bitti" bildirimi
 
 ---
 
 ## 4. Doğrulama (yapılan)
 
-- `node --check` → 4 JS dosyası sözdizimi temiz, `manifest.json` geçerli.
-- **jsdom ile 5 senaryo**, biri gerçek kaydedilmiş sayfa. Test dosyası:
-  `C:\Users\emmgg\Documents\Qoder\2026-10-27\6c36d581\exttest.js`
-  (jsdom geçici olarak `%TEMP%\extest` içine kuruldu; kalıcı bağımlılık yok.)
+- `node --check` → tüm JS dosyaları sözdizimi temiz, `manifest.json` geçerli.
+- **jsdom ile 18 kontrol**, `tests/classify.test.js` (+ `tests/fixtures/`). Çalıştırma:
+
+  ```bash
+  npm i --prefix "%TEMP%\asvisa-test" jsdom
+  set ASVISA_JSDOM=%TEMP%\asvisa-test\node_modules\jsdom
+  node tests/classify.test.js
+  ```
 
 | Senaryo | Beklenen | Sonuç |
 |---|---|---|
-| Kaydedilmiş gerçek sayfa | `none` | ✅ |
-| Aynı sayfa, "randevu yok" metni silinmiş | `available` | ✅ (3 kart) |
-| Sahte Cloudflare bloğu | `blocked` | ✅ |
-| Sahte giriş sayfası | `login` | ✅ |
-| Alakasız sayfa | `unknown` | ✅ |
+| `classify()` saf kararları (6 durum) | tablo | ✅ |
+| Gerçek kaydedilmiş DOM (randevu yok) | `none` + `step` dolu | ✅ |
+| Ofis kartlı fixture (tahmini) | `available`, 3 ofis | ✅ |
+| "Randevu yok" metni silinmiş, kart yok | `unknown` (yanlış pozitif yok) | ✅ |
+| Sahte Cloudflare / giriş / alakasız | `blocked` / `login` / `unknown` | ✅ |
 
-**Yapılamayan doğrulama:** Gerçek Chrome'da, oturum açıkken, **randevu varken** sayfanın DOM'u. Elimizde yalnızca "randevu yok" durumu var; "ofis listelenmiş" hâli **tahmin**. En kırılgan nokta burası.
+**Not:** Gerçek kaydedilmiş sayfa dosyası (`Panel — as-visa.com.html`) sonradan silindi; `tests/fixtures/no-slot.html` o DOM'dan alınan birebir bölümdür. `available.html` ise **tahmini**dir.
+
+**Yapılamayan doğrulama (hâlâ):** Gerçek Chrome'da, oturum açıkken, **randevu varken** sayfanın DOM'u. `available` tespiti hâlâ "ofis butonu var mı" varsayımına dayanıyor.
 
 ---
 
 ## 5. Bilinen sınırlar / riskler
 
-1. **"Uygun randevu var" tespiti heuristik.** Ofis kartlarının markup'ı hiç görülmedi; "metin yoksa randevu vardır" varsayımına dayanıyor. Sihirbaz farklı bir adımda "Başvuru Merkezini Seçin" başlığını korursa yanlış pozitif olur.
+1. **"Uygun randevu var" tespiti hâlâ heuristik.** Artık en az bir ofis butonu şartı aranıyor (yanlış pozitif azaltıldı) ama ofis kartlarının gerçek markup'ı hiç görülmedi. Farklı bir adımda aynı başlık korunursa yine yanlış pozitif olabilir. Tek sağlam çözüm: API teşhis şemasına bağlamak (Görev 6, Aşama B — bekliyor).
 2. **Turnstile** son onayda; eklenti oraya hiç dokunmuyor. Yani uçtan uca otomatik alma yok — bilinçli.
 3. **Chrome açık olmalı.** Bilgisayar uyursa alarm gecikir (uyanınca tetiklenir). Chrome'un kendisi "kaldığın yerden devam et" kapalıysa sekme geri gelmez.
-4. **Sekme yeniden kullanımı** kullanıcının açık sekmesini sömürebilir: `/appointment` dışında bir as-visa sayfasındaysa `tabs.update` ile yönlendiriliyor (kullanıcı akışını bozabilir).
-5. **Navigasyon sonrası sabit 3 sn** beklemek var; yavaş bağlantıda içerik betiği 20 sn daha beklediği için toplam ~25 sn'ye sıkışıyor, timeout 25 sn → **sınırda**. Yükseltilmeli.
-6. **SPA rotası:** Nuxt istemci tarafı yönlendirme yaparsa sekme URL'i değişmeden içerik değişebilir; "check" mesajı eski bağlamda çalışabilir.
-7. **Telegram token'ı** `chrome.storage.local` içinde düz metin. Eklentiye erişen biri okuyabilir. Alternatif: token'ı hiç saklamamak / kullanıcıya seçim sunmak.
-8. **Teşhis kaydı** API yanıtlarının ilk 2000 karakterini saklıyor; KVKK açısından kişisel veri içerebilir (kullanıcının kendi tarayıcısında, dışarı çıkmıyor, 20 kayıtla sınırlı). Yine de varsayılan kapalı olması tartışılır.
+4. **Sekme yeniden kullanımı** kullanıcının açık sekmesini sömürebilir: `/appointment` dışında bir as-visa sayfasındaysa `tabs.update` ile yönlendiriliyor (kullanıcı akışını bozabilir). Artık her turda yönlendirme yapıldığı için kullanıcı o sekmede geziniyorsa sürekli yenilenir.
+5. ~~Sabit 3 sn bekleme~~ → **çözüldü**: `waitComplete()` ile yükleme olayı bekleniyor, mesaj zaman aşımı 60 sn.
+6. **SPA rotası:** Nuxt istemci tarafı yönlendirme yaparsa sekme URL'i değişmeden içerik değişebilir; her turda tam yükleme yapıldığı için risk azaldı.
+7. **Telegram token'ı** `chrome.storage.local` içinde düz metin. Eklentiye erişen biri okuyabilir. Alternatif: token'ı hiç saklamamak / `chrome.storage.session` kullanmak.
+8. **Teşhis kaydı** API yanıtlarının ilk 2000 karakterini saklıyor; KVKK açısından kişisel veri içerebilir. Panoya kopyalarken maskeleniyor, ama `chrome.storage` içinde ham duruyor. Varsayılan kapalı olması tartışılır.
 9. **`web_accessible_resources` yok**, `minimum_chrome_version` yok, ikon seti tek boyut (16/32/48 yok → mağaza dışı kullanımda sorun değil).
 10. **i18n yok**; metinler Türkçe gömülü.
 11. **`notifications` requireInteraction** bazı Windows ayarlarında sessiz kalabilir; ses garantisi yok.
 12. **Alarm minimumu:** MV3'te 15 dk sorun değil; ama tarayıcı kapalıyken hiç çalışmaz — "7/24" isteği aslında "PC açıkken 7/24".
+13. **Sihirbaz 1. adımdan başlarsa** (her yenilemede olası): ofis adımına otomatik tıklama **yok**. Bu durumda `unknown` + `step` bilgisi gelir ve 3 tur sonra uyarı çıkar; kullanıcı adımı elle ilerletmeli. Otomatik ilerletme bilinçli olarak yazılmadı (yanlış kişi/ofis seçme riski).
 
 ---
 
@@ -149,6 +165,21 @@ Metin okuma: `body.innerText`; yoksa `script/style/noscript/template` ayıklanm�
 8. **Test kapsamı:** jsdom senaryolarını repoya almak; `content.js`'i saf fonksiyonlara ayırıp (`classify(text)`) doğrudan birim testi yazmak.
 9. **`chrome.alarms` yerine `chrome.idle`** ile ekran kilitliyken kontrolü atlamak (site yükü ve blok riski azalır).
 10. **Kullanıcıya görünür "son 24 saat" zaman çizelgesi** (kaç kontrol, kaç blok, kaç boş) — güven verir.
+
+---
+
+## 6.5. Uygulanan düzeltmeler (2026-10-28)
+
+| Görev | Durum | Özet |
+|---|---|---|
+| 1 | ✅ | Her turda `tabs.update(APP_URL)` + `waitComplete()`; mesaj zaman aşımı 60 sn ve `clearTimeout` |
+| 2 | ✅ | `step` / `lastStep`: ilk `h2` + `N/8`, popup'ta "Adım" satırı |
+| 3 | ✅ | `classify(text, offices)` saf fonksiyonu; ofis butonu yoksa `available` denmiyor, 2 sn sonra tekrar deneniyor |
+| 4 | ✅ | `unknownStreak` + `lastProblemNotify`: 3 tur üst üste login/unknown → saatte 1 uyarı |
+| 5 | ✅ | `onInstalled` artık yalnızca aktif nöbette alarm kuruyor |
+| 6A | ✅ | "Teşhisi kopyala" + `maskDiag` (e-posta/6+ hane/hassas anahtarlar maskelenir; `ts`, `url` açık) |
+| 6B | ⏳ | API şemasına bağlama — kullanıcı maskelenmiş teşhis çıktısını getirene kadar **bilinçli olarak beklemede**; kodda `TODO(api)` işareti var |
+| Testler | ✅ | `tests/classify.test.js` + `tests/fixtures/` — 18 kontrol |
 
 ---
 

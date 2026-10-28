@@ -2,7 +2,8 @@
 
 `as-visa.com/appointment` sayfasını **15 dakikada bir** kontrol eden, uygun randevu göründüğünde masaüstü bildirimi ve (opsiyonel) Telegram mesajı gönderen Chrome eklentisi (Manifest V3).
 
-- **Yapar:** Senin tarayıcında, senin oturumunla sayfayı açar; ofis adımında uygun merkez listelenmiş mi diye bakar; 72 saat sonra kendini durdurur.
+- **Yapar:** Senin tarayıcında, senin oturumunla **her turda sayfayı yeniden yükler**; ofis adımında uygun merkez listelenmiş mi diye bakar; 72 saat sonra kendini durdurur.
+- **Bildirimler:** randevu görününce masaüstü + Telegram; Cloudflare bloğunda saatte 1; oturum düşerse veya sayfa 3 tur üst üste anlaşılamazsa saatte 1 uyarı.
 - **Yapmaz:** Cloudflare/Turnstile doğrulamasını çözmez, formu otomatik göndermez, kimlik bilgilerini dışarıya göndermez.
 
 ## Kurulum
@@ -16,6 +17,18 @@ Telegram (opsiyonel): @BotFather → `/newbot` → token; bota mesaj at → `get
 ## Teknik detaylar
 
 Mimari, tespit kuralları, doğrulama sonuçları, bilinen sınırlar ve geliştirme önerileri: **[HANDOFF.md](HANDOFF.md)**
+
+Popuptaki **Teşhisi kopyala** butonu, son 20 API yanıtını kişisel alanları maskeledikten sonra (`[email]`, `[num]`, hassas anahtarlar `[gizli]`) panoya kopyalar.
+
+## Testler
+
+```bash
+npm i --prefix "%TEMP%\asvisa-test" jsdom
+set ASVISA_JSDOM=%TEMP%\asvisa-test\node_modules\jsdom
+node tests/classify.test.js
+```
+
+`classify(text, offices)` saf karar fonksiyonunu ve gerçek kaydedilmiş DOM fixture'ını (randevu yok durumu) doğrular.
 
 ## Dosyalar
 
