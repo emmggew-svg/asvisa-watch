@@ -3,6 +3,7 @@ const ALARM = "asvisa-check";
 const PERIOD_MIN = 15;
 const WATCH_MS = 3 * 24 * 60 * 60 * 1000; // 3 gün
 const BLOCKED_NOTIFY_GAP_MS = 60 * 60 * 1000; // blok uyarısını saatte bir tekrarla
+const PROBLEM_NOTIFY_GAP_MS = 60 * 60 * 1000; // login/unknown uyarısını saatte bir tekrarla
 
 const DEFAULT_STATE = {
   active: false,
@@ -15,6 +16,8 @@ const DEFAULT_STATE = {
   lastStep: "",
   lastBlockedNotify: 0,
   lastNotified: 0,
+  unknownStreak: 0,
+  lastProblemNotify: 0,
 };
 
 async function getState() {
@@ -178,9 +181,19 @@ async function checkNow() {
 
   const res = await runCheckOnce();
   const now = Date.now();
-  const patch = { lastCheck: now, lastStatus: res.status || "unknown", lastDetail: res.detail || "", lastOffices: res.offices || [], lastStep: res.step || "" };
+  const status = res.status || "unknown";
+  const problem = status === "unknown" || status === "login";
 
-  if (res.status === "available") {
+  const patch = {
+    lastCheck: now,
+    lastStatus: status,
+    lastDetail: res.detail || "",
+    lastOffices: res.offices || [],
+    lastStep: res.step || "",
+    unknownStreak: problem ? (st.unknownStreak || 0) + 1 : 0,
+  };
+
+  if (status === "available") {
     patch.lastNotified = now;
     await setState(patch);
     await notifyDesktop(`asvisa-available-${now}`, "Randevu açıldı!", (res.offices && res.offices.length ? res.offices.slice(0, 6).join(", ") : res.detail) + " — as-visa.com/appointment");
@@ -188,11 +201,30 @@ async function checkNow() {
     return res;
   }
 
-  if (res.status === "blocked" && now - st.lastBlockedNotify > BLOCKED_NOTIFY_GAP_MS) {
-    patch.lastBlockedNotify = now;
+  if (status === "blocked") {
+    if (now - st.lastBlockedNotify > BLOCKED_NOTIFY_GAP_MS) {
+      patch.lastBlockedNotify = now;
+      await setState(patch);
+      await notifyDesktop(`asvisa-blocked-${now}`, "AS Visa: sayfa bloklu", "Cloudflare sayfayı engelliyor. Tarayıcıda sayfayı elle açıp doğrulamayı geçmen gerekebilir.");
+      await notifyTelegram(`⚠️ AS Visa: Cloudflare sayfayı bloklu gösteriyor, kontrol yapılamıyor.\n${APP_URL}`);
+      return res;
+    }
     await setState(patch);
-    await notifyDesktop(`asvisa-blocked-${now}`, "AS Visa: sayfa bloklu", "Cloudflare sayfayı engelliyor. Tarayıcıda sayfayı elle açıp doğrulamayı geçmen gerekebilir.");
-    await notifyTelegram(`⚠️ AS Visa: Cloudflare sayfayı bloklu gösteriyor, kontrol yapılamıyor.\n${APP_URL}`);
+    return res;
+  }
+
+  // Üst üste 3 kez login/unknown: kullanıcı 3 gün boyunca sessizce habersiz kalmasın
+  if (problem && patch.unknownStreak >= 3 && now - st.lastProblemNotify > PROBLEM_NOTIFY_GAP_MS) {
+    patch.lastProblemNotify = now;
+    await setState(patch);
+    const step = res.step ? ` (adım: ${res.step})` : "";
+    if (status === "login") {
+      await notifyDesktop(`asvisa-login-${now}`, "AS Visa: oturum düşmüş", "as-visa.com'a tekrar giriş yap.");
+      await notifyTelegram(`🔑 AS Visa: oturum düşmüş, as-visa.com'a tekrar giriş yap.\n${APP_URL}`);
+    } else {
+      await notifyDesktop(`asvisa-unknown-${now}`, "AS Visa: durum anlaşılamıyor", `Sayfa durumu anlaşılamıyor${step}. Eklenti ayarı kontrol gerektirebilir.`);
+      await notifyTelegram(`❓ AS Visa: sayfa durumu anlaşılamıyor${step}, eklenti ayarı kontrol gerektirebilir.\n${APP_URL}`);
+    }
     return res;
   }
 
