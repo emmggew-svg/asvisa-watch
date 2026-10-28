@@ -87,9 +87,10 @@ async function ensureContentScript(tabId) {
   try {
     await chrome.tabs.sendMessage(tabId, { type: "ping" });
     return;
-  } catch {
+  } catch { /* dinleyici yok → enjekte etmeyi dene */ }
+  try {
     await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
-  }
+  } catch { /* zaten enjekte edilmiş olabilir; mesaj denemesi aşağıda yapılır */ }
 }
 
 /* Sekme yüklemesi bitene kadar bekle. Dinleyici, yönlendirmeden ÖNCE eklenmeli (yarış durumu). */
@@ -112,7 +113,11 @@ async function runCheckOnce() {
 
   // Her turda taze DOM: sekme zaten /appointment olsa bile yeniden yükle
   const loaded = waitComplete(tab.id);
-  await chrome.tabs.update(tab.id, { url: APP_URL });
+  try {
+    await chrome.tabs.update(tab.id, { url: APP_URL });
+  } catch (e) {
+    return { status: "unknown", detail: "Sekme yönlendirilemedi: " + String(e) };
+  }
   await loaded;
 
   await ensureContentScript(tab.id);
