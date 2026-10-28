@@ -55,12 +55,10 @@ function stepInfo() {
   return [title, ind].filter(Boolean).join(" · ");
 }
 
-async function inspect() {
-  const text = await waitReady();
-  const step = stepInfo();
-
+/* Saf karar fonksiyonu: sayfa metni + ofis kartları → durum. DOM'a dokunmaz, test edilebilir. */
+function classify(text, offices) {
   if (RE_BLOCKED.test(text)) {
-    return { status: "blocked", detail: "Cloudflare sayfayı engelledi. Tarayıcıda sayfayı elle açıp doğrulamayı geçmen gerekebilir.", step };
+    return { status: "blocked", detail: "Cloudflare sayfayı engelledi. Tarayıcıda sayfayı elle açıp doğrulamayı geçmen gerekebilir." };
   }
   if (!RE_WIZARD.test(text)) {
     const login = RE_LOGIN.test(text);
@@ -69,27 +67,43 @@ async function inspect() {
       detail: login
         ? "Oturum kapalı görünüyor: as-visa.com'da giriş yapılmamış."
         : "Randevu sihirbazı bulunamadı; sayfa henüz yüklenmemiş olabilir.",
-      step,
     };
   }
-
   const onOfficeStep = RE_OFFICE_STEP.test(text);
   const noSlot = RE_NO_SLOT.test(text);
 
   if (onOfficeStep && !noSlot) {
-    return { status: "available", detail: "Ofis adımında uygun merkez listeleniyor.", offices: officeCandidates(), step };
+    // Ofis kartları API'den gelmeden "var" demek yanlış pozitif üretirdi
+    if (offices.length > 0) {
+      return { status: "available", detail: "Ofis adımında uygun merkez listeleniyor.", offices };
+    }
+    return { status: "unknown", detail: "Liste henüz yüklenmedi.", waiting: true };
   }
   if (onOfficeStep && noSlot) {
-    return { status: "none", detail: "Ofis adımı: uygun randevu yok.", step };
+    return { status: "none", detail: "Ofis adımı: uygun randevu yok." };
   }
   return {
     status: "unknown",
     detail: noSlot
       ? "Randevu yok metni var ama ofis adımında değiliz."
       : "Sihirbaz açık ama ofis adımı tespit edilemedi.",
-    offices: officeCandidates(),
-    step,
   };
+}
+
+async function inspect() {
+  const text = await waitReady();
+  let res = classify(text, officeCandidates());
+
+  // Liste henüz gelmediyse kısa bir süre tanı, sonra tekrar bak
+  if (res.waiting) {
+    await sleep(2000);
+    res = classify(TXT(), officeCandidates());
+  }
+
+  const out = { ...res };
+  delete out.waiting;
+  out.step = stepInfo();
+  return out;
 }
 
 if (!window.__asvisaWatchLoaded) {
