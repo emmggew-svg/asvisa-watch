@@ -46,6 +46,9 @@ async function render() {
   $("last").className = "v " + cls;
   $("last").textContent = st.lastCheck ? `${fmt(st.lastCheck)} · ${label}` : "—";
 
+  $("step").textContent = st.lastStep || "—";
+  $("step").title = st.lastStep || "";
+
   $("detail").textContent = st.lastDetail || "—";
   $("detail").title = st.lastDetail || "";
 

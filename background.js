@@ -12,6 +12,7 @@ const DEFAULT_STATE = {
   lastStatus: "",
   lastDetail: "",
   lastOffices: [],
+  lastStep: "",
   lastBlockedNotify: 0,
   lastNotified: 0,
 };
@@ -177,7 +178,7 @@ async function checkNow() {
 
   const res = await runCheckOnce();
   const now = Date.now();
-  const patch = { lastCheck: now, lastStatus: res.status || "unknown", lastDetail: res.detail || "", lastOffices: res.offices || [] };
+  const patch = { lastCheck: now, lastStatus: res.status || "unknown", lastDetail: res.detail || "", lastOffices: res.offices || [], lastStep: res.step || "" };
 
   if (res.status === "available") {
     patch.lastNotified = now;

@@ -46,11 +46,21 @@ function officeCandidates() {
   return out;
 }
 
+/* Sihirbazın hangi adımında olduğumuzu gösteren kısa etiket: ilk h2 + "N/8" göstergesi. */
+function stepInfo() {
+  const h2 = document.querySelector("h2");
+  const title = h2 ? (h2.innerText || h2.textContent || "").replace(/\s+/g, " ").trim().slice(0, 60) : "";
+  const m = TXT().match(/\b(\d)\s*\/\s*8\b/);
+  const ind = m ? `${m[1]}/8` : "";
+  return [title, ind].filter(Boolean).join(" · ");
+}
+
 async function inspect() {
   const text = await waitReady();
+  const step = stepInfo();
 
   if (RE_BLOCKED.test(text)) {
-    return { status: "blocked", detail: "Cloudflare sayfayı engelledi. Tarayıcıda sayfayı elle açıp doğrulamayı geçmen gerekebilir." };
+    return { status: "blocked", detail: "Cloudflare sayfayı engelledi. Tarayıcıda sayfayı elle açıp doğrulamayı geçmen gerekebilir.", step };
   }
   if (!RE_WIZARD.test(text)) {
     const login = RE_LOGIN.test(text);
@@ -59,6 +69,7 @@ async function inspect() {
       detail: login
         ? "Oturum kapalı görünüyor: as-visa.com'da giriş yapılmamış."
         : "Randevu sihirbazı bulunamadı; sayfa henüz yüklenmemiş olabilir.",
+      step,
     };
   }
 
@@ -66,10 +77,10 @@ async function inspect() {
   const noSlot = RE_NO_SLOT.test(text);
 
   if (onOfficeStep && !noSlot) {
-    return { status: "available", detail: "Ofis adımında uygun merkez listeleniyor.", offices: officeCandidates() };
+    return { status: "available", detail: "Ofis adımında uygun merkez listeleniyor.", offices: officeCandidates(), step };
   }
   if (onOfficeStep && noSlot) {
-    return { status: "none", detail: "Ofis adımı: uygun randevu yok." };
+    return { status: "none", detail: "Ofis adımı: uygun randevu yok.", step };
   }
   return {
     status: "unknown",
@@ -77,6 +88,7 @@ async function inspect() {
       ? "Randevu yok metni var ama ofis adımında değiliz."
       : "Sihirbaz açık ama ofis adımı tespit edilemedi.",
     offices: officeCandidates(),
+    step,
   };
 }
 
